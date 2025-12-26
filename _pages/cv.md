@@ -91,4 +91,4 @@ Feb. 2023 - June 2023
 
 ---
 
-📄 [Download Full CV (PDF)](/files/Zihao Lin_CV.pdf)
+📄 [Download Full CV (PDF)](/files/Zihao_Lin_CV.pdf)
