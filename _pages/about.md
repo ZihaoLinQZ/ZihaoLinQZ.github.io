@@ -10,9 +10,9 @@ redirect_from:
 I am a 3rd year Ph.D. student at UC Davis, working on multi-modal models. I am fortunate to be advised by [Prof. Lifu Huang](https://wilburone.github.io/). 
 Introduce myself! My research centers on multimodal understanding and generation, including image editing, image generation, and video understanding, aiming to bridge perception and generation through unified multimodal frameworks. I also explore RL-trained and LLM/MLLM-based agents, applying agent frameworks to diverse real-world applications such as design document editing and medical reasoning. My broader interests include retrieval-augmented generation (RAG), interpretability, and the development of efficient, scalable architectures for multimodal intelligence.
 
-Before joining UC Davis, I obtained my master degree from Duke University in 2022, majoring Electronic and Computer Engineering. Before that, I obtained my bachelor degree from Southern University of Science and Technology in 2019, majoring Financial Mathematics.
+Before joining UC Davis, I obtained my master degree from Duke University in 2022, majoring in Electronic and Computer Engineering. Before that, I obtained my bachelor's degree from Southern University of Science and Technology in 2019, majoring Financial Mathematics.
 
-I am always open to collaboration in many domains. If you want to collaborate with me or have any interesting ideas or thoughts want to discuss with me, feel free to contact me: [qzlin@ucdavis.edu](qzlin@ucdavis.edu) and [zihao.lin.0123@gmail.com](zihao.lin.0123@gmail.com).
+I am always open to collaboration in many domains. If you want to collaborate with me or have any interesting ideas or thoughts want to discuss with me, feel free to contact me: [qzlin@ucdavis.edu](mailto:qzlin@ucdavis.edu) and [zihao.lin.0123@gmail.com](mailto:zihao.lin.0123@gmail.com).
 
 News
 ======
