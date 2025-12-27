@@ -1,266 +1,339 @@
-// Daily Paper - GitHub Actions Version
-// Reads paper data from JSON files stored in the repository
+// Daily Paper - Combined Live Fetch + Archive
 // Place at: /assets/js/dailypaper.js
 
 (function() {
   "use strict";
   
-  console.log("[DailyPaper] Script loaded");
+  console.log("[DailyPaper] Loading...");
   
-  // Base path for data files
   var DATA_BASE = "/assets/data/arxiv";
   var INDEX_URL = DATA_BASE + "/index.json";
   var DAILY_DIR = DATA_BASE + "/daily";
   
   function ready(fn) {
-    if (document.readyState !== "loading") {
-      fn();
-    } else {
-      document.addEventListener("DOMContentLoaded", fn);
-    }
+    if (document.readyState !== "loading") fn();
+    else document.addEventListener("DOMContentLoaded", fn);
   }
   
   ready(function() {
-    console.log("[DailyPaper] Initializing...");
+    console.log("[DailyPaper] Init");
     
-    // Elements
+    // === Elements ===
+    var tabLive = document.getElementById("tab-live");
+    var tabArchive = document.getElementById("tab-archive");
+    var panelLive = document.getElementById("panel-live");
+    var panelArchive = document.getElementById("panel-archive");
+    
+    var liveCategory = document.getElementById("live-category");
+    var liveMax = document.getElementById("live-max");
+    var fetchBtn = document.getElementById("fetch-btn");
+    
+    var archiveStatus = document.getElementById("archive-status");
     var dateSelect = document.getElementById("date-select");
-    var prevDayBtn = document.getElementById("prev-day-btn");
-    var nextDayBtn = document.getElementById("next-day-btn");
-    var todayBtn = document.getElementById("today-btn");
-    var dataStatus = document.getElementById("data-status");
-    var categorySelect = document.getElementById("category-select");
+    var prevBtn = document.getElementById("prev-day-btn");
+    var nextBtn = document.getElementById("next-day-btn");
+    var latestBtn = document.getElementById("latest-btn");
+    
+    var categoryFilter = document.getElementById("category-filter");
     var searchInput = document.getElementById("search-input");
-    var refreshBtn = document.getElementById("refresh-btn");
     var keywordTags = document.querySelectorAll(".keyword-tag");
     var clearFiltersBtn = document.getElementById("clear-filters");
+    
+    var statsSection = document.getElementById("stats-section");
+    var totalCount = document.getElementById("total-count");
+    var filteredCount = document.getElementById("filtered-count");
+    var dataSourceInfo = document.getElementById("data-source-info");
+    
     var loading = document.getElementById("loading");
     var loadingText = document.getElementById("loading-text");
     var errorMessage = document.getElementById("error-message");
     var papersList = document.getElementById("papers-list");
-    var statsSection = document.getElementById("stats-section");
-    var totalCount = document.getElementById("total-count");
-    var filteredCount = document.getElementById("filtered-count");
-    var currentDateEl = document.getElementById("current-date");
-    var fetchTimeEl = document.getElementById("fetch-time");
     var loadMoreContainer = document.getElementById("load-more-container");
     var loadMoreBtn = document.getElementById("load-more-btn");
     
-    if (!dateSelect) {
-      console.error("[DailyPaper] Required elements not found!");
+    if (!fetchBtn) {
+      console.error("[DailyPaper] Elements missing!");
       return;
     }
     
-    // State
-    var indexData = null;
+    // === State ===
     var allPapers = [];
     var displayedPapers = [];
     var activeKeywords = [];
     var currentPage = 0;
     var papersPerPage = 20;
-    var currentDateIndex = 0;
+    var indexData = null;
+    var currentDateIdx = 0;
+    var currentMode = "live"; // "live" or "archive"
     
-    // Load index first
-    loadIndex();
+    // === Tab Switching ===
+    tabLive.addEventListener("click", function() {
+      currentMode = "live";
+      tabLive.classList.add("active");
+      tabArchive.classList.remove("active");
+      panelLive.style.display = "block";
+      panelArchive.style.display = "none";
+    });
     
-    // ==================== DATA LOADING ====================
+    tabArchive.addEventListener("click", function() {
+      currentMode = "archive";
+      tabArchive.classList.add("active");
+      tabLive.classList.remove("active");
+      panelArchive.style.display = "block";
+      panelLive.style.display = "none";
+      
+      if (!indexData) {
+        loadArchiveIndex();
+      }
+    });
     
-    function loadIndex() {
-      console.log("[DailyPaper] Loading index...");
-      showLoading("Loading paper archive...");
+    // === Live Fetch ===
+    fetchBtn.addEventListener("click", function() {
+      doLiveFetch();
+    });
+    
+    function doLiveFetch() {
+      var category = liveCategory.value;
+      var maxResults = liveMax.value;
+      
+      console.log("[DailyPaper] Live fetch:", category, maxResults);
+      
+      showLoading("Fetching from arXiv...");
+      hideError();
+      papersList.innerHTML = "";
+      statsSection.style.display = "none";
+      loadMoreContainer.style.display = "none";
+      fetchBtn.disabled = true;
+      fetchBtn.textContent = "Fetching...";
+      
+      var baseUrl = "https://export.arxiv.org/api/query";
+      var query = category === "all" 
+        ? "cat:cs.CV+OR+cat:cs.CL+OR+cat:cs.LG+OR+cat:cs.AI+OR+cat:cs.RO"
+        : "cat:" + category;
+      var arxivUrl = baseUrl + "?search_query=" + query + "&start=0&max_results=" + maxResults + "&sortBy=submittedDate&sortOrder=descending";
+      
+      var proxies = [
+        "https://api.allorigins.win/raw?url=" + encodeURIComponent(arxivUrl),
+        "https://corsproxy.io/?" + encodeURIComponent(arxivUrl),
+        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(arxivUrl)
+      ];
+      
+      tryProxy(0);
+      
+      function tryProxy(idx) {
+        if (idx >= proxies.length) {
+          hideLoading();
+          showError("Failed to fetch. All servers unavailable.");
+          fetchBtn.disabled = false;
+          fetchBtn.textContent = "🔄 Fetch from arXiv";
+          return;
+        }
+        
+        loadingText.textContent = "Trying server " + (idx + 1) + "/" + proxies.length + "...";
+        
+        var xhr = new XMLHttpRequest();
+        xhr.open("GET", proxies[idx], true);
+        xhr.timeout = 25000;
+        
+        xhr.onreadystatechange = function() {
+          if (xhr.readyState === 4) {
+            if (xhr.status === 200 && xhr.responseText.indexOf("<entry>") !== -1) {
+              var papers = parseArxivXML(xhr.responseText);
+              if (papers.length > 0) {
+                allPapers = papers;
+                totalCount.textContent = papers.length;
+                dataSourceInfo.textContent = "🌐 Live from arXiv";
+                dataSourceInfo.style.display = "inline";
+                currentPage = 0;
+                filterPapers();
+                hideLoading();
+                fetchBtn.disabled = false;
+                fetchBtn.textContent = "🔄 Fetch from arXiv";
+                console.log("[DailyPaper] Fetched", papers.length, "papers");
+                return;
+              }
+            }
+            tryProxy(idx + 1);
+          }
+        };
+        
+        xhr.onerror = function() { tryProxy(idx + 1); };
+        xhr.ontimeout = function() { tryProxy(idx + 1); };
+        xhr.send();
+      }
+    }
+    
+    function parseArxivXML(text) {
+      var parser = new DOMParser();
+      var doc = parser.parseFromString(text, "text/xml");
+      var entries = doc.getElementsByTagName("entry");
+      var papers = [];
+      
+      for (var i = 0; i < entries.length; i++) {
+        try {
+          var entry = entries[i];
+          var idEl = entry.getElementsByTagName("id")[0];
+          var id = idEl ? idEl.textContent : "";
+          var arxivId = id.split("/abs/").pop() || id.split("/").pop() || "";
+          
+          var titleEl = entry.getElementsByTagName("title")[0];
+          var title = titleEl ? titleEl.textContent.replace(/\s+/g, " ").trim() : "";
+          
+          var summaryEl = entry.getElementsByTagName("summary")[0];
+          var abstract = summaryEl ? summaryEl.textContent.trim() : "";
+          
+          var publishedEl = entry.getElementsByTagName("published")[0];
+          var published = publishedEl ? publishedEl.textContent : "";
+          
+          var authorEls = entry.getElementsByTagName("author");
+          var authors = [];
+          for (var j = 0; j < authorEls.length; j++) {
+            var nameEl = authorEls[j].getElementsByTagName("name")[0];
+            if (nameEl) authors.push(nameEl.textContent);
+          }
+          
+          var catEls = entry.getElementsByTagName("category");
+          var categories = [];
+          for (var k = 0; k < catEls.length; k++) {
+            var term = catEls[k].getAttribute("term");
+            if (term) categories.push(term);
+          }
+          
+          if (title && arxivId) {
+            papers.push({
+              id: arxivId,
+              title: title,
+              abstract: abstract,
+              authors: authors,
+              published: published,
+              categories: categories
+            });
+          }
+        } catch (e) {}
+      }
+      
+      return papers;
+    }
+    
+    // === Archive ===
+    function loadArchiveIndex() {
+      showLoading("Loading archive index...");
+      archiveStatus.textContent = "Loading...";
       
       fetch(INDEX_URL)
-        .then(function(response) {
-          if (!response.ok) throw new Error("Index not found");
-          return response.json();
+        .then(function(r) {
+          if (!r.ok) throw new Error("Not found");
+          return r.json();
         })
         .then(function(data) {
-          console.log("[DailyPaper] Index loaded:", data.total_days, "days");
           indexData = data;
+          archiveStatus.textContent = data.total_days + " days archived";
           populateDateSelect();
-          updateDataStatus();
+          hideLoading();
           
-          // Load latest day
           if (data.days && data.days.length > 0) {
-            currentDateIndex = 0;
-            loadDay(data.days[0].date);
+            currentDateIdx = 0;
+            loadArchiveDay(data.days[0].date);
           } else {
-            hideLoading();
-            showNoData("No paper data available yet. GitHub Actions will fetch papers daily.");
+            papersList.innerHTML = '<div class="no-data"><div class="no-data-icon">📭</div><p>No archive data yet.</p><p>Run GitHub Actions to start collecting papers.</p></div>';
           }
         })
-        .catch(function(err) {
-          console.log("[DailyPaper] Index error:", err);
+        .catch(function(e) {
           hideLoading();
-          showNoData("Paper archive not initialized yet. Run GitHub Actions to fetch papers.");
+          archiveStatus.textContent = "No archive found";
+          papersList.innerHTML = '<div class="no-data"><div class="no-data-icon">📭</div><p>Archive not initialized.</p><p>Run GitHub Actions workflow first, or use Live Fetch.</p></div>';
         });
     }
     
     function populateDateSelect() {
       dateSelect.innerHTML = "";
-      
       if (!indexData || !indexData.days) return;
       
       var days = indexData.days;
-      var currentGroup = "";
-      var optgroup = null;
-      
       for (var i = 0; i < days.length; i++) {
-        var day = days[i];
-        var groupLabel = getDateGroup(day.date);
-        
-        if (groupLabel !== currentGroup) {
-          currentGroup = groupLabel;
-          optgroup = document.createElement("optgroup");
-          optgroup.label = groupLabel;
-          dateSelect.appendChild(optgroup);
-        }
-        
-        var option = document.createElement("option");
-        option.value = day.date;
-        option.textContent = formatDateDisplay(day.date) + " (" + day.total_count + " papers)";
-        optgroup.appendChild(option);
+        var d = days[i];
+        var opt = document.createElement("option");
+        opt.value = d.date;
+        opt.textContent = formatDate(d.date) + " (" + d.total_count + " papers)";
+        dateSelect.appendChild(opt);
       }
     }
     
-    function getDateGroup(dateStr) {
+    function formatDate(ds) {
       var today = new Date().toISOString().split("T")[0];
-      var yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-      var weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
-      
-      if (dateStr === today) return "Today";
-      if (dateStr === yesterday) return "Yesterday";
-      if (dateStr >= weekAgo) return "This Week";
-      
-      // Get month/year
-      var parts = dateStr.split("-");
-      var months = ["January", "February", "March", "April", "May", "June",
-                    "July", "August", "September", "October", "November", "December"];
-      return months[parseInt(parts[1]) - 1] + " " + parts[0];
+      var yest = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+      if (ds === today) return "Today";
+      if (ds === yest) return "Yesterday";
+      var p = ds.split("-");
+      var m = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      return m[parseInt(p[1])-1] + " " + parseInt(p[2]) + ", " + p[0];
     }
     
-    function formatDateDisplay(dateStr) {
-      var today = new Date().toISOString().split("T")[0];
-      var yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
-      
-      if (dateStr === today) return "Today";
-      if (dateStr === yesterday) return "Yesterday";
-      
-      var parts = dateStr.split("-");
-      var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
-                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-      return months[parseInt(parts[1]) - 1] + " " + parseInt(parts[2]);
-    }
-    
-    function updateDataStatus() {
-      if (!indexData) {
-        dataStatus.textContent = "No data";
-        return;
-      }
-      
-      dataStatus.textContent = indexData.total_days + " days archived";
-    }
-    
-    function loadDay(date) {
-      console.log("[DailyPaper] Loading day:", date);
+    function loadArchiveDay(date) {
       showLoading("Loading " + date + "...");
       
-      var url = DAILY_DIR + "/" + date + ".json";
-      
-      fetch(url)
-        .then(function(response) {
-          if (!response.ok) throw new Error("Day data not found");
-          return response.json();
+      fetch(DAILY_DIR + "/" + date + ".json")
+        .then(function(r) {
+          if (!r.ok) throw new Error("Not found");
+          return r.json();
         })
         .then(function(data) {
-          console.log("[DailyPaper] Loaded", data.total_count, "papers for", date);
-          
           allPapers = data.papers || [];
           totalCount.textContent = allPapers.length;
-          currentDateEl.textContent = formatDateFull(date);
-          
-          if (data.fetched_at) {
-            var fetchDate = new Date(data.fetched_at);
-            fetchTimeEl.textContent = "Fetched: " + fetchDate.toLocaleString();
-          }
-          
-          // Update select
+          dataSourceInfo.textContent = "📂 Archive: " + formatDate(date);
+          dataSourceInfo.style.display = "inline";
           dateSelect.value = date;
-          
-          // Update nav buttons
-          updateNavButtons();
-          
-          // Filter and display
+          updateNavBtns();
           currentPage = 0;
           filterPapers();
           hideLoading();
         })
-        .catch(function(err) {
-          console.log("[DailyPaper] Error loading day:", err);
+        .catch(function(e) {
           hideLoading();
-          showError("Failed to load papers for " + date);
+          showError("Failed to load " + date);
         });
     }
     
-    function formatDateFull(dateStr) {
-      var parts = dateStr.split("-");
-      var months = ["January", "February", "March", "April", "May", "June",
-                    "July", "August", "September", "October", "November", "December"];
-      return months[parseInt(parts[1]) - 1] + " " + parseInt(parts[2]) + ", " + parts[0];
-    }
-    
-    function updateNavButtons() {
+    function updateNavBtns() {
       if (!indexData || !indexData.days) return;
-      
       var days = indexData.days;
-      currentDateIndex = -1;
-      
+      currentDateIdx = -1;
       for (var i = 0; i < days.length; i++) {
         if (days[i].date === dateSelect.value) {
-          currentDateIndex = i;
+          currentDateIdx = i;
           break;
         }
       }
-      
-      prevDayBtn.disabled = (currentDateIndex >= days.length - 1);
-      nextDayBtn.disabled = (currentDateIndex <= 0);
+      prevBtn.disabled = currentDateIdx >= days.length - 1;
+      nextBtn.disabled = currentDateIdx <= 0;
     }
     
-    // ==================== EVENT LISTENERS ====================
-    
     dateSelect.addEventListener("change", function() {
-      if (this.value) {
-        loadDay(this.value);
+      if (this.value) loadArchiveDay(this.value);
+    });
+    
+    prevBtn.addEventListener("click", function() {
+      if (indexData && indexData.days && currentDateIdx < indexData.days.length - 1) {
+        currentDateIdx++;
+        loadArchiveDay(indexData.days[currentDateIdx].date);
       }
     });
     
-    prevDayBtn.addEventListener("click", function() {
-      if (!indexData || !indexData.days) return;
-      if (currentDateIndex < indexData.days.length - 1) {
-        currentDateIndex++;
-        loadDay(indexData.days[currentDateIndex].date);
+    nextBtn.addEventListener("click", function() {
+      if (indexData && indexData.days && currentDateIdx > 0) {
+        currentDateIdx--;
+        loadArchiveDay(indexData.days[currentDateIdx].date);
       }
     });
     
-    nextDayBtn.addEventListener("click", function() {
-      if (!indexData || !indexData.days) return;
-      if (currentDateIndex > 0) {
-        currentDateIndex--;
-        loadDay(indexData.days[currentDateIndex].date);
+    latestBtn.addEventListener("click", function() {
+      if (indexData && indexData.days && indexData.days.length > 0) {
+        currentDateIdx = 0;
+        loadArchiveDay(indexData.days[0].date);
       }
     });
     
-    todayBtn.addEventListener("click", function() {
-      if (!indexData || !indexData.days || indexData.days.length === 0) return;
-      currentDateIndex = 0;
-      loadDay(indexData.days[0].date);
-    });
-    
-    refreshBtn.addEventListener("click", function() {
-      loadIndex();
-    });
-    
-    // Keyword tags
+    // === Filtering ===
     for (var i = 0; i < keywordTags.length; i++) {
       (function(tag) {
         tag.addEventListener("click", function() {
@@ -282,7 +355,7 @@
     clearFiltersBtn.addEventListener("click", function() {
       activeKeywords = [];
       searchInput.value = "";
-      categorySelect.value = "all";
+      categoryFilter.value = "all";
       for (var j = 0; j < keywordTags.length; j++) {
         keywordTags[j].classList.remove("active");
       }
@@ -299,7 +372,7 @@
       }, 300);
     });
     
-    categorySelect.addEventListener("change", function() {
+    categoryFilter.addEventListener("change", function() {
       currentPage = 0;
       filterPapers();
     });
@@ -309,33 +382,29 @@
       showPapers();
     });
     
-    // ==================== FILTERING & DISPLAY ====================
-    
     function filterPapers() {
       var searchVal = searchInput.value.toLowerCase();
-      var searchTerms = searchVal.split(/[\s,]+/).filter(function(t) { return t.length > 0; });
-      var allTerms = searchTerms.concat(activeKeywords.map(function(k) { return k.toLowerCase(); }));
-      var cat = categorySelect.value;
+      var terms = searchVal.split(/[\s,]+/).filter(function(t) { return t; });
+      var allTerms = terms.concat(activeKeywords.map(function(k) { return k.toLowerCase(); }));
+      var cat = categoryFilter.value;
       
-      displayedPapers = allPapers.filter(function(paper) {
-        // Category filter
+      displayedPapers = allPapers.filter(function(p) {
         if (cat !== "all") {
-          var hasCat = false;
-          var cats = paper.categories || [];
-          for (var i = 0; i < cats.length; i++) {
-            if (cats[i] === cat) hasCat = true;
-          }
-          if (!hasCat && paper.primary_category !== cat) return false;
-        }
-        
-        // Keyword filter
-        if (allTerms.length > 0) {
-          var text = (paper.title + " " + paper.abstract + " " + (paper.authors || []).join(" ")).toLowerCase();
           var found = false;
-          for (var j = 0; j < allTerms.length; j++) {
-            if (text.indexOf(allTerms[j]) !== -1) found = true;
+          var cats = p.categories || [];
+          for (var i = 0; i < cats.length; i++) {
+            if (cats[i] === cat) found = true;
           }
           if (!found) return false;
+        }
+        
+        if (allTerms.length > 0) {
+          var txt = (p.title + " " + p.abstract + " " + (p.authors||[]).join(" ")).toLowerCase();
+          var match = false;
+          for (var j = 0; j < allTerms.length; j++) {
+            if (txt.indexOf(allTerms[j]) !== -1) match = true;
+          }
+          if (!match) return false;
         }
         
         return true;
@@ -343,16 +412,14 @@
       
       statsSection.style.display = "flex";
       filteredCount.textContent = displayedPapers.length;
-      
       currentPage = 0;
       papersList.innerHTML = "";
       showPapers();
     }
     
     function showPapers() {
-      var searchVal = searchInput.value.toLowerCase();
-      var searchTerms = searchVal.split(/[\s,]+/).filter(function(t) { return t.length > 0; });
-      var allTerms = searchTerms.concat(activeKeywords.map(function(k) { return k.toLowerCase(); }));
+      var terms = searchInput.value.toLowerCase().split(/[\s,]+/).filter(function(t) { return t; });
+      var allTerms = terms.concat(activeKeywords.map(function(k) { return k.toLowerCase(); }));
       
       var start = currentPage * papersPerPage;
       var end = start + papersPerPage;
@@ -368,14 +435,13 @@
         papersList.appendChild(createCard(toShow[i], allTerms));
       }
       
-      loadMoreContainer.style.display = (end < displayedPapers.length) ? "block" : "none";
+      loadMoreContainer.style.display = end < displayedPapers.length ? "block" : "none";
     }
     
     function createCard(paper, terms) {
       var title = escapeHTML(paper.title);
       var abstract = escapeHTML(paper.abstract || "");
       
-      // Highlight search terms
       for (var i = 0; i < terms.length; i++) {
         if (terms[i]) {
           var re = new RegExp("(" + escapeRegex(terms[i]) + ")", "gi");
@@ -386,50 +452,43 @@
       
       var date = paper.published ? new Date(paper.published).toLocaleDateString() : "";
       var authors = paper.authors || [];
-      var authorsStr = authors.length > 0 ? authors.slice(0, 5).join(", ") : "N/A";
-      if (authors.length > 5) authorsStr += " et al.";
-      
-      var cats = paper.categories || [];
-      var catsStr = cats.slice(0, 3).join(", ");
-      
+      var authStr = authors.length > 0 ? authors.slice(0, 5).join(", ") : "N/A";
+      if (authors.length > 5) authStr += " et al.";
+      var cats = (paper.categories || []).slice(0, 3).join(", ");
       var safeId = (paper.id || "").replace(/[^a-zA-Z0-9]/g, "_");
-      var absUrl = paper.abs_url || ("https://arxiv.org/abs/" + paper.id);
-      var pdfUrl = paper.pdf_url || ("https://arxiv.org/pdf/" + paper.id + ".pdf");
+      var absUrl = "https://arxiv.org/abs/" + paper.id;
+      var pdfUrl = "https://arxiv.org/pdf/" + paper.id + ".pdf";
       
       var card = document.createElement("div");
       card.className = "paper-card";
       
-      var html = '<h3 class="paper-title"><a href="' + absUrl + '" target="_blank" rel="noopener">' + title + '</a></h3>';
+      var html = '<h3 class="paper-title"><a href="' + absUrl + '" target="_blank">' + title + '</a></h3>';
       html += '<div class="paper-meta">';
       if (date) html += '<span>📅 ' + date + '</span>';
-      if (catsStr) html += '<span>🏷️ ' + catsStr + '</span>';
+      if (cats) html += '<span>🏷️ ' + cats + '</span>';
       html += '</div>';
-      html += '<div class="paper-authors"><strong>Authors:</strong> ' + escapeHTML(authorsStr) + '</div>';
-      
+      html += '<div class="paper-authors"><strong>Authors:</strong> ' + escapeHTML(authStr) + '</div>';
       if (abstract) {
         html += '<div class="paper-abstract" id="abs_' + safeId + '">' + abstract + '</div>';
         html += '<button class="expand-btn" data-id="abs_' + safeId + '">Show more ▼</button>';
       }
-      
       html += '<div class="paper-links">';
-      html += '<a href="' + absUrl + '" class="paper-link arxiv" target="_blank" rel="noopener">📄 arXiv</a>';
-      html += '<a href="' + pdfUrl + '" class="paper-link pdf" target="_blank" rel="noopener">📥 PDF</a>';
+      html += '<a href="' + absUrl + '" class="paper-link arxiv" target="_blank">📄 arXiv</a>';
+      html += '<a href="' + pdfUrl + '" class="paper-link pdf" target="_blank">📥 PDF</a>';
       html += '</div>';
       
       card.innerHTML = html;
       
-      // Expand button
       var btn = card.querySelector(".expand-btn");
       if (btn) {
         btn.addEventListener("click", function() {
-          var targetId = this.getAttribute("data-id");
-          var absEl = document.getElementById(targetId);
-          if (absEl) {
-            if (absEl.classList.contains("expanded")) {
-              absEl.classList.remove("expanded");
+          var el = document.getElementById(this.getAttribute("data-id"));
+          if (el) {
+            if (el.classList.contains("expanded")) {
+              el.classList.remove("expanded");
               this.textContent = "Show more ▼";
             } else {
-              absEl.classList.add("expanded");
+              el.classList.add("expanded");
               this.textContent = "Show less ▲";
             }
           }
@@ -439,23 +498,21 @@
       return card;
     }
     
-    // ==================== HELPERS ====================
-    
-    function escapeHTML(str) {
-      if (!str) return "";
-      var div = document.createElement("div");
-      div.textContent = str;
-      return div.innerHTML;
+    // === Helpers ===
+    function escapeHTML(s) {
+      if (!s) return "";
+      var d = document.createElement("div");
+      d.textContent = s;
+      return d.innerHTML;
     }
     
-    function escapeRegex(str) {
-      return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    function escapeRegex(s) {
+      return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
     
     function showLoading(msg) {
       loading.style.display = "block";
       loadingText.textContent = msg || "Loading...";
-      errorMessage.style.display = "none";
     }
     
     function hideLoading() {
@@ -467,8 +524,8 @@
       errorMessage.style.display = "block";
     }
     
-    function showNoData(msg) {
-      papersList.innerHTML = '<div class="no-data"><div class="no-data-icon">📚</div><p>' + msg + '</p></div>';
+    function hideError() {
+      errorMessage.style.display = "none";
     }
     
     console.log("[DailyPaper] Ready!");
