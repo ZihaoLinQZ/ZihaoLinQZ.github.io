@@ -1,0 +1,40 @@
+name: Fetch Daily arXiv Papers
+
+on:
+  schedule:
+    # Runs at 9:00 AM UTC every day (arXiv updates around 8 PM EST / 1 AM UTC)
+    - cron: '0 9 * * *'
+  workflow_dispatch: # Allow manual trigger
+
+jobs:
+  fetch-papers:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        pip install arxiv feedparser requests
+
+    - name: Fetch arXiv papers
+      run: |
+        python scripts/fetch_arxiv.py
+
+    - name: Commit and push if changed
+      run: |
+        git config --local user.email "action@github.com"
+        git config --local user.name "GitHub Action"
+        git add -A
+        if git diff --staged --quiet; then
+          echo "No changes to commit"
+        else
+          git commit -m "Update daily arXiv papers - $(date +'%Y-%m-%d')"
+          git push
+        fi
