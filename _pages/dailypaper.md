@@ -14,8 +14,8 @@ author_profile: true
   <!-- Data Source Toggle -->
   <div class="data-source-toggle">
     <label class="toggle-label">
-      <input type="checkbox" id="use-cache" checked>
-      <span class="toggle-text">Use cached data (faster)</span>
+      <input type="checkbox" id="use-cache">
+      <span class="toggle-text">Use cached data (faster, if available)</span>
     </label>
   </div>
 
@@ -101,7 +101,7 @@ author_profile: true
   <!-- Loading Indicator -->
   <div id="loading" class="loading" style="display: none;">
     <div class="spinner"></div>
-    <p>Fetching papers from arXiv...</p>
+    <p id="loading-text">Fetching papers from arXiv...</p>
   </div>
 
   <!-- Error Message -->
@@ -625,11 +625,6 @@ author_profile: true
     gap: 8px;
   }
 }
-
-/* Dark mode support (optional) */
-@media (prefers-color-scheme: dark) {
-  /* Add dark mode styles if needed */
-}
 </style>
 
 <script>
@@ -641,6 +636,7 @@ document.addEventListener('DOMContentLoaded', function() {
   const fetchBtn = document.getElementById('fetch-btn');
   const fetchBtnText = document.getElementById('fetch-btn-text');
   const loading = document.getElementById('loading');
+  const loadingText = document.getElementById('loading-text');
   const errorMessage = document.getElementById('error-message');
   const papersList = document.getElementById('papers-list');
   const statsSection = document.getElementById('stats-section');
@@ -659,6 +655,11 @@ document.addEventListener('DOMContentLoaded', function() {
   let activeKeywords = new Set();
   let currentPage = 0;
   const papersPerPage = 20;
+  
+  // Debug logging
+  function log(msg, data) {
+    console.log(`[DailyPaper] ${msg}`, data || '');
+  }
   
   // Event Listeners
   keywordTags.forEach(tag => {
@@ -698,7 +699,10 @@ document.addEventListener('DOMContentLoaded', function() {
     filterAndDisplayPapers();
   });
   
-  fetchBtn.addEventListener('click', fetchPapers);
+  fetchBtn.addEventListener('click', function() {
+    log('Fetch button clicked');
+    fetchPapers();
+  });
   
   loadMoreBtn.addEventListener('click', function() {
     currentPage++;
@@ -707,6 +711,8 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Fetch Papers
   async function fetchPapers() {
+    log('fetchPapers() called');
+    
     const useCache = useCacheCheckbox.checked;
     const category = categorySelect.value;
     const maxResults = maxResultsSelect.value;
@@ -721,28 +727,39 @@ document.addEventListener('DOMContentLoaded', function() {
     
     try {
       if (useCache) {
-        // Try to load from cached JSON first
+        log('Trying cached data...');
+        loadingText.textContent = 'Loading cached data...';
         const cachedData = await fetchCachedData();
-        if (cachedData) {
+        if (cachedData && cachedData.papers && cachedData.papers.length > 0) {
+          log('Using cached data', cachedData.papers.length + ' papers');
           allPapers = cachedData.papers;
           lastUpdated.textContent = new Date(cachedData.updated).toLocaleString();
         } else {
-          // Fall back to live API
+          log('No cached data, falling back to API');
+          loadingText.textContent = 'Fetching from arXiv API...';
           allPapers = await fetchFromArxivAPI(category, maxResults);
           lastUpdated.textContent = new Date().toLocaleString();
         }
       } else {
+        log('Fetching from API directly');
+        loadingText.textContent = 'Fetching from arXiv API...';
         allPapers = await fetchFromArxivAPI(category, maxResults);
         lastUpdated.textContent = new Date().toLocaleString();
       }
       
+      log('Got papers:', allPapers.length);
       totalCount.textContent = allPapers.length;
       currentPage = 0;
       filterAndDisplayPapers();
       
     } catch (err) {
-      console.error('Error:', err);
-      errorMessage.textContent = `Error: ${err.message}. Please try again.`;
+      log('Error:', err);
+      console.error('Full error:', err);
+      errorMessage.innerHTML = `
+        <strong>Error:</strong> ${err.message}<br>
+        <small>This is usually caused by CORS restrictions. The arXiv API doesn't allow direct browser requests.</small><br>
+        <small>Try unchecking "Use cached data" and clicking Fetch again, or check the browser console for details.</small>
+      `;
       errorMessage.style.display = 'block';
     } finally {
       loading.style.display = 'none';
@@ -753,86 +770,133 @@ document.addEventListener('DOMContentLoaded', function() {
   
   async function fetchCachedData() {
     try {
-      // Try to load the cached JSON file
       const response = await fetch('/assets/data/arxiv/papers.json');
+      log('Cache response status:', response.status);
       if (response.ok) {
-        return await response.json();
+        const data = await response.json();
+        log('Cached data loaded:', data);
+        return data;
       }
     } catch (e) {
-      console.log('No cached data available, using live API');
+      log('Cache fetch error:', e.message);
     }
     return null;
   }
   
   async function fetchFromArxivAPI(category, maxResults) {
     const baseUrl = 'https://export.arxiv.org/api/query';
-    const query = category === 'all' ? '' : `cat:${category}`;
+    const query = category === 'all' ? 'cat:cs.CV OR cat:cs.CL OR cat:cs.LG OR cat:cs.AI' : `cat:${category}`;
     
     const params = new URLSearchParams({
-      search_query: query || 'cat:cs.CV OR cat:cs.CL OR cat:cs.LG OR cat:cs.AI',
+      search_query: query,
       start: 0,
       max_results: maxResults,
       sortBy: 'submittedDate',
       sortOrder: 'descending'
     });
     
-    // Try multiple CORS proxies
+    const directUrl = `${baseUrl}?${params}`;
+    log('arXiv URL:', directUrl);
+    
+    // List of CORS proxies to try (updated and working ones)
     const proxyUrls = [
-      `https://api.allorigins.win/raw?url=${encodeURIComponent(`${baseUrl}?${params}`)}`,
-      `https://corsproxy.io/?${encodeURIComponent(`${baseUrl}?${params}`)}`,
-      `${baseUrl}?${params}`
+      `https://api.allorigins.win/raw?url=${encodeURIComponent(directUrl)}`,
+      `https://corsproxy.io/?${encodeURIComponent(directUrl)}`,
+      `https://cors-anywhere.herokuapp.com/${directUrl}`,
+      `https://thingproxy.freeboard.io/fetch/${directUrl}`
     ];
     
-    let response = null;
+    let lastError = null;
     
-    for (const url of proxyUrls) {
+    for (let i = 0; i < proxyUrls.length; i++) {
+      const proxyUrl = proxyUrls[i];
+      log(`Trying proxy ${i + 1}/${proxyUrls.length}...`);
+      loadingText.textContent = `Trying proxy ${i + 1}/${proxyUrls.length}...`;
+      
       try {
-        response = await fetch(url);
-        if (response.ok) break;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+        
+        const response = await fetch(proxyUrl, {
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/xml, text/xml, */*'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+          const xmlText = await response.text();
+          log('Got response, length:', xmlText.length);
+          
+          // Check if we got valid XML
+          if (xmlText.includes('<entry>') || xmlText.includes('<feed')) {
+            const papers = parseArxivXML(xmlText);
+            if (papers.length > 0) {
+              log('Successfully parsed papers:', papers.length);
+              return papers;
+            }
+          }
+          log('Response did not contain valid arXiv data');
+        } else {
+          log(`Proxy ${i + 1} returned status:`, response.status);
+        }
       } catch (e) {
-        continue;
+        log(`Proxy ${i + 1} failed:`, e.message);
+        lastError = e;
       }
     }
     
-    if (!response || !response.ok) {
-      throw new Error('Failed to fetch from arXiv API. Please try again later.');
-    }
-    
-    const xmlText = await response.text();
-    return parseArxivXML(xmlText);
+    throw new Error(lastError?.message || 'All CORS proxies failed. Please try again later.');
   }
   
   function parseArxivXML(xmlText) {
     const parser = new DOMParser();
     const xmlDoc = parser.parseFromString(xmlText, 'text/xml');
+    
+    // Check for parsing errors
+    const parseError = xmlDoc.querySelector('parsererror');
+    if (parseError) {
+      log('XML parse error:', parseError.textContent);
+      return [];
+    }
+    
     const entries = xmlDoc.querySelectorAll('entry');
+    log('Found entries:', entries.length);
     
     const papers = [];
-    entries.forEach(entry => {
-      const id = entry.querySelector('id')?.textContent || '';
-      const arxivId = id.split('/abs/').pop() || id.split('/').pop();
-      
-      const title = entry.querySelector('title')?.textContent?.replace(/\s+/g, ' ').trim() || '';
-      const summary = entry.querySelector('summary')?.textContent?.trim() || '';
-      const published = entry.querySelector('published')?.textContent || '';
-      
-      const authors = Array.from(entry.querySelectorAll('author name'))
-        .map(a => a.textContent);
-      
-      const categories = Array.from(entry.querySelectorAll('category'))
-        .map(c => c.getAttribute('term'))
-        .filter(Boolean);
-      
-      papers.push({
-        id: arxivId,
-        title,
-        abstract: summary,
-        authors,
-        published: published,
-        categories,
-        abs_url: `https://arxiv.org/abs/${arxivId}`,
-        pdf_url: `https://arxiv.org/pdf/${arxivId}.pdf`
-      });
+    entries.forEach((entry, index) => {
+      try {
+        const id = entry.querySelector('id')?.textContent || '';
+        const arxivId = id.split('/abs/').pop() || id.split('/').pop();
+        
+        const title = entry.querySelector('title')?.textContent?.replace(/\s+/g, ' ').trim() || '';
+        const summary = entry.querySelector('summary')?.textContent?.trim() || '';
+        const published = entry.querySelector('published')?.textContent || '';
+        
+        const authors = Array.from(entry.querySelectorAll('author name'))
+          .map(a => a.textContent);
+        
+        const categories = Array.from(entry.querySelectorAll('category'))
+          .map(c => c.getAttribute('term'))
+          .filter(Boolean);
+        
+        if (title && arxivId) {
+          papers.push({
+            id: arxivId,
+            title,
+            abstract: summary,
+            authors,
+            published: published,
+            categories,
+            abs_url: `https://arxiv.org/abs/${arxivId}`,
+            pdf_url: `https://arxiv.org/pdf/${arxivId}.pdf`
+          });
+        }
+      } catch (e) {
+        log(`Error parsing entry ${index}:`, e.message);
+      }
     });
     
     return papers;
@@ -912,6 +976,9 @@ document.addEventListener('DOMContentLoaded', function() {
     const publishedDate = paper.published ? new Date(paper.published).toLocaleDateString() : 'N/A';
     const authorsDisplay = Array.isArray(paper.authors) ? paper.authors.join(', ') : paper.authors;
     
+    // Create a safe ID for the abstract toggle
+    const safeId = paper.id.replace(/[^a-zA-Z0-9]/g, '_');
+    
     const card = document.createElement('div');
     card.className = `paper-card${hasMatchedKeywords ? ' has-keywords' : ''}`;
     card.innerHTML = `
@@ -921,15 +988,15 @@ document.addEventListener('DOMContentLoaded', function() {
       <div class="paper-meta">
         <span>📅 ${publishedDate}</span>
         <span>🏷️ ${(paper.categories || []).slice(0, 3).join(', ')}</span>
-        <span>📝 ${paper.id}</span>
+        <span>📝 ${escapeHtml(paper.id)}</span>
       </div>
       <div class="paper-authors">
-        <strong>Authors:</strong> ${escapeHtml(authorsDisplay)}
+        <strong>Authors:</strong> ${escapeHtml(authorsDisplay || 'N/A')}
       </div>
-      <div class="paper-abstract" id="abstract-${paper.id}">
-        ${abstract}
+      <div class="paper-abstract" id="abstract-${safeId}">
+        ${abstract || 'No abstract available.'}
       </div>
-      <button class="expand-btn" onclick="toggleAbstract('${paper.id}')">
+      <button class="expand-btn" data-id="${safeId}">
         Show more ▼
       </button>
       <div class="paper-links">
@@ -941,6 +1008,20 @@ document.addEventListener('DOMContentLoaded', function() {
         </a>
       </div>
     `;
+    
+    // Add event listener for expand button
+    const expandBtn = card.querySelector('.expand-btn');
+    expandBtn.addEventListener('click', function() {
+      const id = this.dataset.id;
+      const abstractEl = document.getElementById(`abstract-${id}`);
+      if (abstractEl.classList.contains('expanded')) {
+        abstractEl.classList.remove('expanded');
+        this.textContent = 'Show more ▼';
+      } else {
+        abstractEl.classList.add('expanded');
+        this.textContent = 'Show less ▲';
+      }
+    });
     
     return card;
   }
@@ -956,20 +1037,14 @@ document.addEventListener('DOMContentLoaded', function() {
     return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
   
-  // Global function for abstract toggle
-  window.toggleAbstract = function(id) {
-    const abstract = document.getElementById(`abstract-${id}`);
-    const btn = abstract.nextElementSibling;
-    if (abstract.classList.contains('expanded')) {
-      abstract.classList.remove('expanded');
-      btn.textContent = 'Show more ▼';
-    } else {
-      abstract.classList.add('expanded');
-      btn.textContent = 'Show less ▲';
-    }
-  };
-  
-  // Auto-fetch on page load
-  fetchPapers();
+  // Initialize - show a message instead of auto-fetching
+  log('Daily Paper initialized');
+  papersList.innerHTML = `
+    <div class="no-results">
+      <div class="no-results-icon">🚀</div>
+      <p>Click <strong>"Fetch Papers"</strong> to load the latest papers from arXiv.</p>
+      <p><small>Tip: If fetching fails, try checking/unchecking "Use cached data".</small></p>
+    </div>
+  `;
 });
 </script>
