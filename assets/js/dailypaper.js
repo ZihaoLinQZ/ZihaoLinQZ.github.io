@@ -1,12 +1,17 @@
-// Daily Paper - arXiv Paper Fetcher
-// This file should be placed at /assets/js/dailypaper.js
+// Daily Paper - GitHub Actions Version
+// Reads paper data from JSON files stored in the repository
+// Place at: /assets/js/dailypaper.js
 
 (function() {
   "use strict";
   
   console.log("[DailyPaper] Script loaded");
   
-  // Wait for DOM ready
+  // Base path for data files
+  var DATA_BASE = "/assets/data/arxiv";
+  var INDEX_URL = DATA_BASE + "/index.json";
+  var DAILY_DIR = DATA_BASE + "/daily";
+  
   function ready(fn) {
     if (document.readyState !== "loading") {
       fn();
@@ -16,13 +21,19 @@
   }
   
   ready(function() {
-    console.log("[DailyPaper] DOM ready, initializing...");
+    console.log("[DailyPaper] Initializing...");
     
-    // Get elements
+    // Elements
+    var dateSelect = document.getElementById("date-select");
+    var prevDayBtn = document.getElementById("prev-day-btn");
+    var nextDayBtn = document.getElementById("next-day-btn");
+    var todayBtn = document.getElementById("today-btn");
+    var dataStatus = document.getElementById("data-status");
     var categorySelect = document.getElementById("category-select");
-    var maxResultsSelect = document.getElementById("max-results");
     var searchInput = document.getElementById("search-input");
-    var fetchBtn = document.getElementById("fetch-btn");
+    var refreshBtn = document.getElementById("refresh-btn");
+    var keywordTags = document.querySelectorAll(".keyword-tag");
+    var clearFiltersBtn = document.getElementById("clear-filters");
     var loading = document.getElementById("loading");
     var loadingText = document.getElementById("loading-text");
     var errorMessage = document.getElementById("error-message");
@@ -30,28 +41,226 @@
     var statsSection = document.getElementById("stats-section");
     var totalCount = document.getElementById("total-count");
     var filteredCount = document.getElementById("filtered-count");
-    var lastUpdated = document.getElementById("last-updated");
-    var clearFiltersBtn = document.getElementById("clear-filters");
+    var currentDateEl = document.getElementById("current-date");
+    var fetchTimeEl = document.getElementById("fetch-time");
     var loadMoreContainer = document.getElementById("load-more-container");
     var loadMoreBtn = document.getElementById("load-more-btn");
-    var keywordTags = document.querySelectorAll(".keyword-tag");
     
-    // Check elements
-    if (!fetchBtn) {
-      console.error("[DailyPaper] ERROR: fetch-btn not found!");
+    if (!dateSelect) {
+      console.error("[DailyPaper] Required elements not found!");
       return;
     }
     
-    console.log("[DailyPaper] All elements found");
-    
     // State
+    var indexData = null;
     var allPapers = [];
     var displayedPapers = [];
     var activeKeywords = [];
     var currentPage = 0;
     var papersPerPage = 20;
+    var currentDateIndex = 0;
     
-    // Keyword tag clicks
+    // Load index first
+    loadIndex();
+    
+    // ==================== DATA LOADING ====================
+    
+    function loadIndex() {
+      console.log("[DailyPaper] Loading index...");
+      showLoading("Loading paper archive...");
+      
+      fetch(INDEX_URL)
+        .then(function(response) {
+          if (!response.ok) throw new Error("Index not found");
+          return response.json();
+        })
+        .then(function(data) {
+          console.log("[DailyPaper] Index loaded:", data.total_days, "days");
+          indexData = data;
+          populateDateSelect();
+          updateDataStatus();
+          
+          // Load latest day
+          if (data.days && data.days.length > 0) {
+            currentDateIndex = 0;
+            loadDay(data.days[0].date);
+          } else {
+            hideLoading();
+            showNoData("No paper data available yet. GitHub Actions will fetch papers daily.");
+          }
+        })
+        .catch(function(err) {
+          console.log("[DailyPaper] Index error:", err);
+          hideLoading();
+          showNoData("Paper archive not initialized yet. Run GitHub Actions to fetch papers.");
+        });
+    }
+    
+    function populateDateSelect() {
+      dateSelect.innerHTML = "";
+      
+      if (!indexData || !indexData.days) return;
+      
+      var days = indexData.days;
+      var currentGroup = "";
+      var optgroup = null;
+      
+      for (var i = 0; i < days.length; i++) {
+        var day = days[i];
+        var groupLabel = getDateGroup(day.date);
+        
+        if (groupLabel !== currentGroup) {
+          currentGroup = groupLabel;
+          optgroup = document.createElement("optgroup");
+          optgroup.label = groupLabel;
+          dateSelect.appendChild(optgroup);
+        }
+        
+        var option = document.createElement("option");
+        option.value = day.date;
+        option.textContent = formatDateDisplay(day.date) + " (" + day.total_count + " papers)";
+        optgroup.appendChild(option);
+      }
+    }
+    
+    function getDateGroup(dateStr) {
+      var today = new Date().toISOString().split("T")[0];
+      var yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+      var weekAgo = new Date(Date.now() - 7 * 86400000).toISOString().split("T")[0];
+      
+      if (dateStr === today) return "Today";
+      if (dateStr === yesterday) return "Yesterday";
+      if (dateStr >= weekAgo) return "This Week";
+      
+      // Get month/year
+      var parts = dateStr.split("-");
+      var months = ["January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"];
+      return months[parseInt(parts[1]) - 1] + " " + parts[0];
+    }
+    
+    function formatDateDisplay(dateStr) {
+      var today = new Date().toISOString().split("T")[0];
+      var yesterday = new Date(Date.now() - 86400000).toISOString().split("T")[0];
+      
+      if (dateStr === today) return "Today";
+      if (dateStr === yesterday) return "Yesterday";
+      
+      var parts = dateStr.split("-");
+      var months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
+                    "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+      return months[parseInt(parts[1]) - 1] + " " + parseInt(parts[2]);
+    }
+    
+    function updateDataStatus() {
+      if (!indexData) {
+        dataStatus.textContent = "No data";
+        return;
+      }
+      
+      dataStatus.textContent = indexData.total_days + " days archived";
+    }
+    
+    function loadDay(date) {
+      console.log("[DailyPaper] Loading day:", date);
+      showLoading("Loading " + date + "...");
+      
+      var url = DAILY_DIR + "/" + date + ".json";
+      
+      fetch(url)
+        .then(function(response) {
+          if (!response.ok) throw new Error("Day data not found");
+          return response.json();
+        })
+        .then(function(data) {
+          console.log("[DailyPaper] Loaded", data.total_count, "papers for", date);
+          
+          allPapers = data.papers || [];
+          totalCount.textContent = allPapers.length;
+          currentDateEl.textContent = formatDateFull(date);
+          
+          if (data.fetched_at) {
+            var fetchDate = new Date(data.fetched_at);
+            fetchTimeEl.textContent = "Fetched: " + fetchDate.toLocaleString();
+          }
+          
+          // Update select
+          dateSelect.value = date;
+          
+          // Update nav buttons
+          updateNavButtons();
+          
+          // Filter and display
+          currentPage = 0;
+          filterPapers();
+          hideLoading();
+        })
+        .catch(function(err) {
+          console.log("[DailyPaper] Error loading day:", err);
+          hideLoading();
+          showError("Failed to load papers for " + date);
+        });
+    }
+    
+    function formatDateFull(dateStr) {
+      var parts = dateStr.split("-");
+      var months = ["January", "February", "March", "April", "May", "June",
+                    "July", "August", "September", "October", "November", "December"];
+      return months[parseInt(parts[1]) - 1] + " " + parseInt(parts[2]) + ", " + parts[0];
+    }
+    
+    function updateNavButtons() {
+      if (!indexData || !indexData.days) return;
+      
+      var days = indexData.days;
+      currentDateIndex = -1;
+      
+      for (var i = 0; i < days.length; i++) {
+        if (days[i].date === dateSelect.value) {
+          currentDateIndex = i;
+          break;
+        }
+      }
+      
+      prevDayBtn.disabled = (currentDateIndex >= days.length - 1);
+      nextDayBtn.disabled = (currentDateIndex <= 0);
+    }
+    
+    // ==================== EVENT LISTENERS ====================
+    
+    dateSelect.addEventListener("change", function() {
+      if (this.value) {
+        loadDay(this.value);
+      }
+    });
+    
+    prevDayBtn.addEventListener("click", function() {
+      if (!indexData || !indexData.days) return;
+      if (currentDateIndex < indexData.days.length - 1) {
+        currentDateIndex++;
+        loadDay(indexData.days[currentDateIndex].date);
+      }
+    });
+    
+    nextDayBtn.addEventListener("click", function() {
+      if (!indexData || !indexData.days) return;
+      if (currentDateIndex > 0) {
+        currentDateIndex--;
+        loadDay(indexData.days[currentDateIndex].date);
+      }
+    });
+    
+    todayBtn.addEventListener("click", function() {
+      if (!indexData || !indexData.days || indexData.days.length === 0) return;
+      currentDateIndex = 0;
+      loadDay(indexData.days[0].date);
+    });
+    
+    refreshBtn.addEventListener("click", function() {
+      loadIndex();
+    });
+    
+    // Keyword tags
     for (var i = 0; i < keywordTags.length; i++) {
       (function(tag) {
         tag.addEventListener("click", function() {
@@ -70,20 +279,17 @@
       })(keywordTags[i]);
     }
     
-    // Clear filters
-    if (clearFiltersBtn) {
-      clearFiltersBtn.addEventListener("click", function() {
-        activeKeywords = [];
-        searchInput.value = "";
-        for (var i = 0; i < keywordTags.length; i++) {
-          keywordTags[i].classList.remove("active");
-        }
-        currentPage = 0;
-        filterPapers();
-      });
-    }
+    clearFiltersBtn.addEventListener("click", function() {
+      activeKeywords = [];
+      searchInput.value = "";
+      categorySelect.value = "all";
+      for (var j = 0; j < keywordTags.length; j++) {
+        keywordTags[j].classList.remove("active");
+      }
+      currentPage = 0;
+      filterPapers();
+    });
     
-    // Search input
     var searchTimer = null;
     searchInput.addEventListener("input", function() {
       clearTimeout(searchTimer);
@@ -93,178 +299,17 @@
       }, 300);
     });
     
-    // Category change
     categorySelect.addEventListener("change", function() {
       currentPage = 0;
       filterPapers();
     });
     
-    // Load more
-    if (loadMoreBtn) {
-      loadMoreBtn.addEventListener("click", function() {
-        currentPage++;
-        showPapers();
-      });
-    }
-    
-    // FETCH BUTTON
-    fetchBtn.addEventListener("click", function() {
-      console.log("[DailyPaper] Fetch button clicked!");
-      doFetch();
+    loadMoreBtn.addEventListener("click", function() {
+      currentPage++;
+      showPapers();
     });
     
-    console.log("[DailyPaper] Event listeners attached");
-    
-    // Main fetch function
-    function doFetch() {
-      var category = categorySelect.value;
-      var maxResults = maxResultsSelect.value;
-      
-      console.log("[DailyPaper] Fetching category=" + category + ", max=" + maxResults);
-      
-      // UI updates
-      loading.style.display = "block";
-      loadingText.textContent = "Connecting to arXiv...";
-      errorMessage.style.display = "none";
-      papersList.innerHTML = "";
-      statsSection.style.display = "none";
-      loadMoreContainer.style.display = "none";
-      fetchBtn.disabled = true;
-      fetchBtn.textContent = "Loading...";
-      
-      // Build URL
-      var baseUrl = "https://export.arxiv.org/api/query";
-      var query;
-      if (category === "all") {
-        query = "cat:cs.CV+OR+cat:cs.CL+OR+cat:cs.LG+OR+cat:cs.AI";
-      } else {
-        query = "cat:" + category;
-      }
-      var arxivUrl = baseUrl + "?search_query=" + query + "&start=0&max_results=" + maxResults + "&sortBy=submittedDate&sortOrder=descending";
-      
-      console.log("[DailyPaper] arXiv URL: " + arxivUrl);
-      
-      // Proxies to try
-      var proxies = [
-        "https://api.allorigins.win/raw?url=" + encodeURIComponent(arxivUrl),
-        "https://corsproxy.io/?" + encodeURIComponent(arxivUrl),
-        "https://api.codetabs.com/v1/proxy?quest=" + encodeURIComponent(arxivUrl)
-      ];
-      
-      tryProxy(0);
-      
-      function tryProxy(idx) {
-        if (idx >= proxies.length) {
-          showError("Failed to fetch papers. All servers are unavailable. Please try again later.");
-          return;
-        }
-        
-        var url = proxies[idx];
-        console.log("[DailyPaper] Trying proxy " + (idx + 1) + "/" + proxies.length);
-        loadingText.textContent = "Trying server " + (idx + 1) + "/" + proxies.length + "...";
-        
-        var xhr = new XMLHttpRequest();
-        xhr.open("GET", url, true);
-        xhr.timeout = 25000;
-        
-        xhr.onreadystatechange = function() {
-          if (xhr.readyState === 4) {
-            if (xhr.status === 200) {
-              var text = xhr.responseText;
-              console.log("[DailyPaper] Response received, length: " + text.length);
-              
-              if (text.indexOf("<entry>") !== -1) {
-                var papers = parseXML(text);
-                console.log("[DailyPaper] Parsed " + papers.length + " papers");
-                
-                if (papers.length > 0) {
-                  allPapers = papers;
-                  totalCount.textContent = papers.length;
-                  lastUpdated.textContent = new Date().toLocaleString();
-                  currentPage = 0;
-                  filterPapers();
-                  finishLoading();
-                  return;
-                }
-              }
-              
-              console.log("[DailyPaper] Invalid response, trying next");
-              tryProxy(idx + 1);
-            } else {
-              console.log("[DailyPaper] HTTP " + xhr.status + ", trying next");
-              tryProxy(idx + 1);
-            }
-          }
-        };
-        
-        xhr.onerror = function() {
-          console.log("[DailyPaper] Network error, trying next");
-          tryProxy(idx + 1);
-        };
-        
-        xhr.ontimeout = function() {
-          console.log("[DailyPaper] Timeout, trying next");
-          tryProxy(idx + 1);
-        };
-        
-        xhr.send();
-      }
-    }
-    
-    function parseXML(text) {
-      var parser = new DOMParser();
-      var doc = parser.parseFromString(text, "text/xml");
-      var entries = doc.getElementsByTagName("entry");
-      var papers = [];
-      
-      for (var i = 0; i < entries.length; i++) {
-        try {
-          var entry = entries[i];
-          
-          var idEl = entry.getElementsByTagName("id")[0];
-          var id = idEl ? idEl.textContent : "";
-          var arxivId = id.split("/abs/").pop() || id.split("/").pop() || "";
-          
-          var titleEl = entry.getElementsByTagName("title")[0];
-          var title = titleEl ? titleEl.textContent.replace(/\s+/g, " ").trim() : "";
-          
-          var summaryEl = entry.getElementsByTagName("summary")[0];
-          var summary = summaryEl ? summaryEl.textContent.trim() : "";
-          
-          var publishedEl = entry.getElementsByTagName("published")[0];
-          var published = publishedEl ? publishedEl.textContent : "";
-          
-          var authorEls = entry.getElementsByTagName("author");
-          var authors = [];
-          for (var j = 0; j < authorEls.length; j++) {
-            var nameEl = authorEls[j].getElementsByTagName("name")[0];
-            if (nameEl) authors.push(nameEl.textContent);
-          }
-          
-          var catEls = entry.getElementsByTagName("category");
-          var categories = [];
-          for (var k = 0; k < catEls.length; k++) {
-            var term = catEls[k].getAttribute("term");
-            if (term) categories.push(term);
-          }
-          
-          if (title && arxivId) {
-            papers.push({
-              id: arxivId,
-              title: title,
-              abstract: summary,
-              authors: authors,
-              published: published,
-              categories: categories
-            });
-          }
-        } catch (e) {
-          console.log("[DailyPaper] Parse error: " + e.message);
-        }
-      }
-      
-      return papers;
-    }
+    // ==================== FILTERING & DISPLAY ====================
     
     function filterPapers() {
       var searchVal = searchInput.value.toLowerCase();
@@ -276,24 +321,19 @@
         // Category filter
         if (cat !== "all") {
           var hasCat = false;
-          for (var i = 0; i < paper.categories.length; i++) {
-            if (paper.categories[i] === cat) {
-              hasCat = true;
-              break;
-            }
+          var cats = paper.categories || [];
+          for (var i = 0; i < cats.length; i++) {
+            if (cats[i] === cat) hasCat = true;
           }
-          if (!hasCat) return false;
+          if (!hasCat && paper.primary_category !== cat) return false;
         }
         
         // Keyword filter
         if (allTerms.length > 0) {
-          var text = (paper.title + " " + paper.abstract + " " + paper.authors.join(" ")).toLowerCase();
+          var text = (paper.title + " " + paper.abstract + " " + (paper.authors || []).join(" ")).toLowerCase();
           var found = false;
           for (var j = 0; j < allTerms.length; j++) {
-            if (text.indexOf(allTerms[j]) !== -1) {
-              found = true;
-              break;
-            }
+            if (text.indexOf(allTerms[j]) !== -1) found = true;
           }
           if (!found) return false;
         }
@@ -319,14 +359,13 @@
       var toShow = displayedPapers.slice(start, end);
       
       if (toShow.length === 0 && currentPage === 0) {
-        papersList.innerHTML = '<div class="init-message"><p>📭 No papers found. Try different filters.</p></div>';
+        papersList.innerHTML = '<div class="no-data"><div class="no-data-icon">📭</div><p>No papers match your filters.</p></div>';
         loadMoreContainer.style.display = "none";
         return;
       }
       
       for (var i = 0; i < toShow.length; i++) {
-        var card = createCard(toShow[i], allTerms);
-        papersList.appendChild(card);
+        papersList.appendChild(createCard(toShow[i], allTerms));
       }
       
       loadMoreContainer.style.display = (end < displayedPapers.length) ? "block" : "none";
@@ -334,9 +373,9 @@
     
     function createCard(paper, terms) {
       var title = escapeHTML(paper.title);
-      var abstract = escapeHTML(paper.abstract);
+      var abstract = escapeHTML(paper.abstract || "");
       
-      // Highlight
+      // Highlight search terms
       for (var i = 0; i < terms.length; i++) {
         if (terms[i]) {
           var re = new RegExp("(" + escapeRegex(terms[i]) + ")", "gi");
@@ -345,45 +384,62 @@
         }
       }
       
-      var date = paper.published ? new Date(paper.published).toLocaleDateString() : "N/A";
-      var authorsStr = paper.authors.length > 0 ? paper.authors.join(", ") : "N/A";
-      var catsStr = paper.categories.slice(0, 3).join(", ");
-      var safeId = paper.id.replace(/[^a-zA-Z0-9]/g, "_");
-      var absUrl = "https://arxiv.org/abs/" + paper.id;
-      var pdfUrl = "https://arxiv.org/pdf/" + paper.id + ".pdf";
+      var date = paper.published ? new Date(paper.published).toLocaleDateString() : "";
+      var authors = paper.authors || [];
+      var authorsStr = authors.length > 0 ? authors.slice(0, 5).join(", ") : "N/A";
+      if (authors.length > 5) authorsStr += " et al.";
+      
+      var cats = paper.categories || [];
+      var catsStr = cats.slice(0, 3).join(", ");
+      
+      var safeId = (paper.id || "").replace(/[^a-zA-Z0-9]/g, "_");
+      var absUrl = paper.abs_url || ("https://arxiv.org/abs/" + paper.id);
+      var pdfUrl = paper.pdf_url || ("https://arxiv.org/pdf/" + paper.id + ".pdf");
       
       var card = document.createElement("div");
       card.className = "paper-card";
       
-      var html = '';
-      html += '<h3 class="paper-title"><a href="' + absUrl + '" target="_blank">' + title + '</a></h3>';
-      html += '<div class="paper-meta"><span>📅 ' + date + '</span><span>🏷️ ' + catsStr + '</span></div>';
+      var html = '<h3 class="paper-title"><a href="' + absUrl + '" target="_blank" rel="noopener">' + title + '</a></h3>';
+      html += '<div class="paper-meta">';
+      if (date) html += '<span>📅 ' + date + '</span>';
+      if (catsStr) html += '<span>🏷️ ' + catsStr + '</span>';
+      html += '</div>';
       html += '<div class="paper-authors"><strong>Authors:</strong> ' + escapeHTML(authorsStr) + '</div>';
-      html += '<div class="paper-abstract" id="abs_' + safeId + '">' + abstract + '</div>';
-      html += '<button class="expand-btn" data-id="abs_' + safeId + '">Show more ▼</button>';
+      
+      if (abstract) {
+        html += '<div class="paper-abstract" id="abs_' + safeId + '">' + abstract + '</div>';
+        html += '<button class="expand-btn" data-id="abs_' + safeId + '">Show more ▼</button>';
+      }
+      
       html += '<div class="paper-links">';
-      html += '<a href="' + absUrl + '" class="paper-link arxiv" target="_blank">📄 arXiv</a>';
-      html += '<a href="' + pdfUrl + '" class="paper-link pdf" target="_blank">📥 PDF</a>';
+      html += '<a href="' + absUrl + '" class="paper-link arxiv" target="_blank" rel="noopener">📄 arXiv</a>';
+      html += '<a href="' + pdfUrl + '" class="paper-link pdf" target="_blank" rel="noopener">📥 PDF</a>';
       html += '</div>';
       
       card.innerHTML = html;
       
       // Expand button
       var btn = card.querySelector(".expand-btn");
-      btn.addEventListener("click", function() {
-        var targetId = this.getAttribute("data-id");
-        var absEl = document.getElementById(targetId);
-        if (absEl.classList.contains("expanded")) {
-          absEl.classList.remove("expanded");
-          this.textContent = "Show more ▼";
-        } else {
-          absEl.classList.add("expanded");
-          this.textContent = "Show less ▲";
-        }
-      });
+      if (btn) {
+        btn.addEventListener("click", function() {
+          var targetId = this.getAttribute("data-id");
+          var absEl = document.getElementById(targetId);
+          if (absEl) {
+            if (absEl.classList.contains("expanded")) {
+              absEl.classList.remove("expanded");
+              this.textContent = "Show more ▼";
+            } else {
+              absEl.classList.add("expanded");
+              this.textContent = "Show less ▲";
+            }
+          }
+        });
+      }
       
       return card;
     }
+    
+    // ==================== HELPERS ====================
     
     function escapeHTML(str) {
       if (!str) return "";
@@ -396,21 +452,25 @@
       return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     }
     
-    function showError(msg) {
+    function showLoading(msg) {
+      loading.style.display = "block";
+      loadingText.textContent = msg || "Loading...";
+      errorMessage.style.display = "none";
+    }
+    
+    function hideLoading() {
       loading.style.display = "none";
-      fetchBtn.disabled = false;
-      fetchBtn.textContent = "🔄 Fetch Papers";
+    }
+    
+    function showError(msg) {
       errorMessage.textContent = msg;
       errorMessage.style.display = "block";
     }
     
-    function finishLoading() {
-      loading.style.display = "none";
-      fetchBtn.disabled = false;
-      fetchBtn.textContent = "🔄 Fetch Papers";
+    function showNoData(msg) {
+      papersList.innerHTML = '<div class="no-data"><div class="no-data-icon">📚</div><p>' + msg + '</p></div>';
     }
     
-    console.log("[DailyPaper] Initialization complete!");
+    console.log("[DailyPaper] Ready!");
   });
-  
 })();
