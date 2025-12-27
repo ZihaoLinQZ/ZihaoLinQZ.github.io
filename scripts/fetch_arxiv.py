@@ -1,232 +1,188 @@
 #!/usr/bin/env python3
 """
-Fetch daily arXiv papers and save as JSON for the Daily Paper page.
-This script is designed to be run via GitHub Actions.
+Fetch latest papers from arXiv API and save to JSON files.
+This script is run daily by GitHub Actions.
 """
 
 import json
 import os
-from datetime import datetime, timedelta
+import time
 import urllib.request
+import urllib.parse
 import xml.etree.ElementTree as ET
-from typing import List, Dict, Optional
+from datetime import datetime, timezone
 
-# Configuration - modify these according to your interests
+# Categories to fetch
 CATEGORIES = [
-    "cs.CV",    # Computer Vision
-    "cs.CL",    # Computation and Language
-    "cs.LG",    # Machine Learning
-    "cs.AI",    # Artificial Intelligence
+    "cs.CV",   # Computer Vision
+    "cs.CL",   # Computation and Language
+    "cs.LG",   # Machine Learning
+    "cs.AI",   # Artificial Intelligence
+    "cs.RO",   # Robotics
 ]
 
-MAX_RESULTS = 100  # Maximum papers to fetch per category
-OUTPUT_DIR = "_data/arxiv"  # Output directory for JSON files
+MAX_RESULTS_PER_CATEGORY = 100
+OUTPUT_DIR = "assets/data/arxiv/daily"
 
-# Optional: Keywords to highlight or filter
-KEYWORDS = [
-    "transformer", "diffusion", "llm", "large language model",
-    "multimodal", "vision", "generation", "detection", "segmentation",
-    "3d", "video", "image", "neural", "deep learning"
-]
-
-
-def fetch_arxiv_papers(category: str, max_results: int = 100) -> List[Dict]:
-    """Fetch papers from arXiv API for a specific category."""
-    
+def fetch_arxiv(category, max_results=100):
+    """Fetch papers from arXiv API for a given category."""
     base_url = "http://export.arxiv.org/api/query"
-    query = f"cat:{category}"
-    
     params = {
-        "search_query": query,
+        "search_query": f"cat:{category}",
         "start": 0,
         "max_results": max_results,
         "sortBy": "submittedDate",
         "sortOrder": "descending"
     }
     
-    query_string = "&".join([f"{k}={v}" for k, v in params.items()])
-    url = f"{base_url}?{query_string}"
+    url = f"{base_url}?{urllib.parse.urlencode(params)}"
+    print(f"Fetching {category}: {url}")
     
     try:
-        with urllib.request.urlopen(url, timeout=30) as response:
-            xml_data = response.read().decode('utf-8')
+        req = urllib.request.Request(url, headers={"User-Agent": "DailyPaper/1.0"})
+        with urllib.request.urlopen(req, timeout=60) as response:
+            xml_data = response.read().decode("utf-8")
+        return parse_arxiv_xml(xml_data)
     except Exception as e:
         print(f"Error fetching {category}: {e}")
         return []
-    
-    return parse_arxiv_xml(xml_data)
 
-
-def parse_arxiv_xml(xml_data: str) -> List[Dict]:
+def parse_arxiv_xml(xml_text):
     """Parse arXiv API XML response."""
-    
-    # Define namespaces
-    namespaces = {
-        'atom': 'http://www.w3.org/2005/Atom',
-        'arxiv': 'http://arxiv.org/schemas/atom'
-    }
-    
     papers = []
     
-    try:
-        root = ET.fromstring(xml_data)
-        
-        for entry in root.findall('atom:entry', namespaces):
-            paper = {}
-            
-            # Extract ID
-            id_elem = entry.find('atom:id', namespaces)
-            if id_elem is not None:
-                paper['id'] = id_elem.text.split('/')[-1]
-                paper['url'] = id_elem.text
-            
-            # Extract title
-            title_elem = entry.find('atom:title', namespaces)
-            if title_elem is not None:
-                paper['title'] = ' '.join(title_elem.text.split())
-            
-            # Extract summary/abstract
-            summary_elem = entry.find('atom:summary', namespaces)
-            if summary_elem is not None:
-                paper['abstract'] = summary_elem.text.strip()
-            
-            # Extract authors
-            authors = []
-            for author in entry.findall('atom:author', namespaces):
-                name_elem = author.find('atom:name', namespaces)
-                if name_elem is not None:
-                    authors.append(name_elem.text)
-            paper['authors'] = authors
-            
-            # Extract dates
-            published = entry.find('atom:published', namespaces)
-            if published is not None:
-                paper['published'] = published.text
-            
-            updated = entry.find('atom:updated', namespaces)
-            if updated is not None:
-                paper['updated'] = updated.text
-            
-            # Extract categories
-            categories = []
-            for cat in entry.findall('atom:category', namespaces):
-                term = cat.get('term')
-                if term:
-                    categories.append(term)
-            paper['categories'] = categories
-            
-            # Extract links
-            for link in entry.findall('atom:link', namespaces):
-                link_type = link.get('type', '')
-                href = link.get('href', '')
-                if 'pdf' in link_type or 'pdf' in href:
-                    paper['pdf_url'] = href
-                elif link.get('rel') == 'alternate':
-                    paper['abs_url'] = href
-            
-            # Add PDF URL if not found
-            if 'pdf_url' not in paper and 'id' in paper:
-                paper['pdf_url'] = f"https://arxiv.org/pdf/{paper['id']}.pdf"
-            
-            if 'abs_url' not in paper and 'id' in paper:
-                paper['abs_url'] = f"https://arxiv.org/abs/{paper['id']}"
-            
-            papers.append(paper)
+    # Define namespace
+    ns = {
+        "atom": "http://www.w3.org/2005/Atom",
+        "arxiv": "http://arxiv.org/schemas/atom"
+    }
     
+    try:
+        root = ET.fromstring(xml_text)
+        entries = root.findall("atom:entry", ns)
+        
+        for entry in entries:
+            try:
+                # Get ID
+                id_elem = entry.find("atom:id", ns)
+                arxiv_id = ""
+                if id_elem is not None and id_elem.text:
+                    arxiv_id = id_elem.text.split("/abs/")[-1].split("/")[-1]
+                
+                # Get title
+                title_elem = entry.find("atom:title", ns)
+                title = ""
+                if title_elem is not None and title_elem.text:
+                    title = " ".join(title_elem.text.split())
+                
+                # Get abstract
+                summary_elem = entry.find("atom:summary", ns)
+                abstract = ""
+                if summary_elem is not None and summary_elem.text:
+                    abstract = summary_elem.text.strip()
+                
+                # Get published date
+                published_elem = entry.find("atom:published", ns)
+                published = ""
+                if published_elem is not None and published_elem.text:
+                    published = published_elem.text
+                
+                # Get authors
+                authors = []
+                for author in entry.findall("atom:author", ns):
+                    name_elem = author.find("atom:name", ns)
+                    if name_elem is not None and name_elem.text:
+                        authors.append(name_elem.text)
+                
+                # Get categories
+                categories = []
+                for cat in entry.findall("atom:category", ns):
+                    term = cat.get("term")
+                    if term:
+                        categories.append(term)
+                
+                # Get primary category
+                primary_cat_elem = entry.find("arxiv:primary_category", ns)
+                primary_category = ""
+                if primary_cat_elem is not None:
+                    primary_category = primary_cat_elem.get("term", "")
+                
+                if title and arxiv_id:
+                    papers.append({
+                        "id": arxiv_id,
+                        "title": title,
+                        "abstract": abstract,
+                        "authors": authors,
+                        "published": published,
+                        "categories": categories,
+                        "primary_category": primary_category,
+                        "abs_url": f"https://arxiv.org/abs/{arxiv_id}",
+                        "pdf_url": f"https://arxiv.org/pdf/{arxiv_id}.pdf"
+                    })
+            except Exception as e:
+                print(f"Error parsing entry: {e}")
+                continue
+                
     except ET.ParseError as e:
-        print(f"Error parsing XML: {e}")
+        print(f"XML parse error: {e}")
     
     return papers
 
-
-def check_keywords(paper: Dict, keywords: List[str]) -> List[str]:
-    """Check which keywords appear in the paper title or abstract."""
-    matched = []
-    text = (paper.get('title', '') + ' ' + paper.get('abstract', '')).lower()
-    
-    for keyword in keywords:
-        if keyword.lower() in text:
-            matched.append(keyword)
-    
-    return matched
-
-
 def main():
     """Main function to fetch and save papers."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     
-    # Create output directory
+    # Ensure output directory exists
     os.makedirs(OUTPUT_DIR, exist_ok=True)
     
     all_papers = []
     seen_ids = set()
     
-    print(f"Fetching papers from categories: {CATEGORIES}")
-    
     for category in CATEGORIES:
-        print(f"  Fetching {category}...")
-        papers = fetch_arxiv_papers(category, MAX_RESULTS)
+        print(f"\n{'='*50}")
+        print(f"Fetching category: {category}")
+        print(f"{'='*50}")
         
+        papers = fetch_arxiv(category, MAX_RESULTS_PER_CATEGORY)
+        print(f"Got {len(papers)} papers from {category}")
+        
+        # Add papers, avoiding duplicates
         for paper in papers:
-            paper_id = paper.get('id', '')
-            if paper_id and paper_id not in seen_ids:
-                # Add matched keywords
-                paper['matched_keywords'] = check_keywords(paper, KEYWORDS)
+            if paper["id"] not in seen_ids:
+                seen_ids.add(paper["id"])
                 all_papers.append(paper)
-                seen_ids.add(paper_id)
         
-        print(f"    Found {len(papers)} papers")
+        # Be nice to arXiv API
+        time.sleep(3)
     
+    print(f"\n{'='*50}")
     print(f"Total unique papers: {len(all_papers)}")
+    print(f"{'='*50}")
     
     # Sort by published date (newest first)
-    all_papers.sort(key=lambda x: x.get('published', ''), reverse=True)
+    all_papers.sort(key=lambda x: x.get("published", ""), reverse=True)
     
-    # Save all papers
-    output_file = os.path.join(OUTPUT_DIR, "papers.json")
-    with open(output_file, 'w', encoding='utf-8') as f:
-        json.dump({
-            'updated': datetime.utcnow().isoformat() + 'Z',
-            'total': len(all_papers),
-            'categories': CATEGORIES,
-            'papers': all_papers
-        }, f, ensure_ascii=False, indent=2)
+    # Save to daily file
+    output_file = os.path.join(OUTPUT_DIR, f"{today}.json")
+    output_data = {
+        "date": today,
+        "fetched_at": datetime.now(timezone.utc).isoformat(),
+        "categories": CATEGORIES,
+        "total_count": len(all_papers),
+        "papers": all_papers
+    }
     
-    print(f"Saved to {output_file}")
+    with open(output_file, "w", encoding="utf-8") as f:
+        json.dump(output_data, f, ensure_ascii=False, indent=2)
     
-    # Save daily snapshot
-    today = datetime.utcnow().strftime('%Y-%m-%d')
-    daily_file = os.path.join(OUTPUT_DIR, f"papers-{today}.json")
-    with open(daily_file, 'w', encoding='utf-8') as f:
-        json.dump({
-            'date': today,
-            'updated': datetime.utcnow().isoformat() + 'Z',
-            'total': len(all_papers),
-            'papers': all_papers
-        }, f, ensure_ascii=False, indent=2)
+    print(f"\nSaved to: {output_file}")
     
-    print(f"Saved daily snapshot to {daily_file}")
+    # Also save as latest.json for quick access
+    latest_file = os.path.join(OUTPUT_DIR, "latest.json")
+    with open(latest_file, "w", encoding="utf-8") as f:
+        json.dump(output_data, f, ensure_ascii=False, indent=2)
     
-    # Clean up old daily files (keep last 7 days)
-    cleanup_old_files(OUTPUT_DIR, days=7)
-
-
-def cleanup_old_files(directory: str, days: int = 7):
-    """Remove daily JSON files older than specified days."""
-    cutoff = datetime.utcnow() - timedelta(days=days)
-    
-    for filename in os.listdir(directory):
-        if filename.startswith('papers-') and filename.endswith('.json'):
-            try:
-                date_str = filename.replace('papers-', '').replace('.json', '')
-                file_date = datetime.strptime(date_str, '%Y-%m-%d')
-                
-                if file_date < cutoff:
-                    filepath = os.path.join(directory, filename)
-                    os.remove(filepath)
-                    print(f"Removed old file: {filename}")
-            except ValueError:
-                continue
-
+    print(f"Saved to: {latest_file}")
 
 if __name__ == "__main__":
     main()
