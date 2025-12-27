@@ -1,13 +1,15 @@
-/* Daily Paper Styles */
+/* Daily Paper Styles - GitHub Actions Version */
+
 #arxiv-container {
   max-width: 1000px;
   margin: 0 auto;
   padding: 20px;
 }
 
+/* Header */
 .arxiv-header {
   text-align: center;
-  margin-bottom: 30px;
+  margin-bottom: 25px;
   padding-bottom: 20px;
   border-bottom: 2px solid #e9ecef;
 }
@@ -15,15 +17,104 @@
 .arxiv-header h2 {
   font-size: 2em;
   color: #1a1a2e;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
 }
 
 .arxiv-subtitle {
   color: #666;
-  font-size: 1.1em;
+  font-size: 1em;
   margin: 0;
 }
 
+/* Date Section */
+.date-section {
+  background: linear-gradient(135deg, #fef3c7, #fde68a);
+  border: 1px solid #f59e0b;
+  border-radius: 12px;
+  padding: 15px 20px;
+  margin-bottom: 20px;
+}
+
+.date-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+}
+
+.date-header h4 {
+  margin: 0;
+  color: #92400e;
+  font-size: 1em;
+}
+
+.data-status {
+  font-size: 0.85em;
+  color: #78350f;
+  background: rgba(255,255,255,0.6);
+  padding: 3px 10px;
+  border-radius: 12px;
+}
+
+.date-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.date-controls select {
+  flex: 1;
+  min-width: 180px;
+  padding: 10px 12px;
+  border: 2px solid #fbbf24;
+  border-radius: 8px;
+  font-size: 0.95em;
+  background: white;
+  cursor: pointer;
+}
+
+.date-controls select:focus {
+  outline: none;
+  border-color: #f59e0b;
+}
+
+.nav-btn {
+  padding: 10px 16px;
+  border: 2px solid #fbbf24;
+  background: white;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  color: #92400e;
+  transition: all 0.2s;
+}
+
+.nav-btn:hover {
+  background: #fef3c7;
+}
+
+.nav-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.today-btn {
+  padding: 10px 20px;
+  border: none;
+  background: #f59e0b;
+  color: white;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.today-btn:hover {
+  background: #d97706;
+}
+
+/* Controls Section */
 .arxiv-controls {
   display: flex;
   flex-wrap: wrap;
@@ -90,6 +181,7 @@
   transform: none;
 }
 
+/* Keyword Section */
 .keyword-section {
   background: white;
   padding: 15px 20px;
@@ -119,15 +211,17 @@
   font-size: 0.85em;
   transition: all 0.2s;
   border: 2px solid transparent;
+  user-select: none;
 }
 
-.keyword-tag:hover,
-.keyword-tag.active {
+.keyword-tag:hover {
   background: #4a90d9;
   color: white;
 }
 
 .keyword-tag.active {
+  background: #4a90d9;
+  color: white;
   border-color: #357abd;
 }
 
@@ -147,17 +241,26 @@
   color: #dc2626;
 }
 
+/* Stats Section */
 .stats-section {
   display: flex;
   flex-wrap: wrap;
   gap: 20px;
   padding: 15px 20px;
-  background: #e8f4f8;
+  background: linear-gradient(135deg, #e0f2fe, #bae6fd);
   border-radius: 10px;
   margin-bottom: 20px;
   font-size: 0.9em;
+  align-items: center;
 }
 
+.fetch-time {
+  margin-left: auto;
+  font-size: 0.85em;
+  color: #64748b;
+}
+
+/* Loading */
 .loading {
   text-align: center;
   padding: 40px;
@@ -178,6 +281,7 @@
   100% { transform: rotate(360deg); }
 }
 
+/* Error */
 .error-message {
   background: #fee2e2;
   color: #dc2626;
@@ -187,19 +291,26 @@
   border-left: 4px solid #dc2626;
 }
 
+/* Init Message */
+.init-message {
+  text-align: center;
+  padding: 60px 20px;
+  color: #666;
+}
+
+.init-icon {
+  font-size: 3em;
+  margin-bottom: 15px;
+}
+
+/* Papers List */
 .papers-list {
   display: flex;
   flex-direction: column;
   gap: 15px;
 }
 
-.init-message {
-  text-align: center;
-  padding: 50px 20px;
-  color: #666;
-  font-size: 1.1em;
-}
-
+/* Paper Card */
 .paper-card {
   background: white;
   border: 1px solid #e0e0e0;
@@ -297,6 +408,11 @@
   font-size: 0.85em;
   text-decoration: none;
   font-weight: 500;
+  transition: opacity 0.2s;
+}
+
+.paper-link:hover {
+  opacity: 0.85;
 }
 
 .paper-link.arxiv {
@@ -315,15 +431,49 @@
   border-radius: 2px;
 }
 
+/* No Data */
+.no-data {
+  text-align: center;
+  padding: 60px 20px;
+  color: #666;
+}
+
+.no-data-icon {
+  font-size: 3em;
+  margin-bottom: 15px;
+}
+
+/* Responsive */
 @media (max-width: 768px) {
   .arxiv-controls {
     flex-direction: column;
   }
+  
   .control-group,
   .control-group.search-group {
     width: 100%;
   }
+  
   .fetch-button {
     width: 100%;
+  }
+  
+  .date-controls {
+    flex-direction: column;
+  }
+  
+  .date-controls select,
+  .nav-btn,
+  .today-btn {
+    width: 100%;
+  }
+  
+  .stats-section {
+    flex-direction: column;
+    gap: 8px;
+  }
+  
+  .fetch-time {
+    margin-left: 0;
   }
 }
