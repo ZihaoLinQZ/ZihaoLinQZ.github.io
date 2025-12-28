@@ -1,0 +1,22 @@
+{
+  "updated_at": "2025-12-28T06:08:51.761399+00:00",
+  "total_days": 1,
+  "latest_date": "2025-12-28",
+  "oldest_date": "2025-12-28",
+  "days": [
+    {
+      "date": "2025-12-28",
+      "filename": "2025-12-28.json",
+      "path": "/assets/data/arxiv/daily/2025-12-28.json",
+      "total_count": 396,
+      "categories": [
+        "cs.CV",
+        "cs.CL",
+        "cs.LG",
+        "cs.AI",
+        "cs.RO"
+      ],
+      "fetched_at": "2025-12-28T06:08:51.696296+00:00"
+    }
+  ]
+}
