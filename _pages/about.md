@@ -34,6 +34,7 @@ Feb. 2023 - June 2023
 
 News
 ======
+* **04/01/2026**: One paper about conversational user simulation has been accepted to EACL 2026.
 * **12/26/2025**: I will join Meta as a Research Scientist Intern in June 2026.
 * **11/03/2025**: One paper about reasoning-based multi-layer design document editing accepted to NeurIPS 2025 Workshop Multimodal Algorithm Reasoning, awarded as a spotlight paper.
 * **09/18/2025**: Two papers about context compression and multi-modal interpretability accepted to NeurIPS 2025.
