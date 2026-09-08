@@ -34,6 +34,7 @@ Feb. 2023 - June 2023
 
 News
 ======
+* **09/08/2026**: One paper about efficient RL for image generation has been accepted to AACL 2026.
 * **08/20/2026**: One paper about zero-shot 3D Visual Grounding has been accepted to EMNLP 2026.
 * **08/20/2026**: One paper about multi-layer multi-modal document editing has been accepted to TMLR 2026.
 * **07/31/2026**: Two papers about agentic video editing and game video glitch detection have been accepted to ACMMM 2026.
